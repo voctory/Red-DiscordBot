@@ -33,12 +33,10 @@ from redbot.core import (
     i18n,
 )
 from .utils.predicates import MessagePredicate
-from .utils.chat_formatting import humanize_timedelta, pagify, box, inline, humanize_list
-from .commands.requires import PrivilegeLevel
-
+from .utils.chat_formatting import humanize_timedelta, pagify, box, inline
 
 if TYPE_CHECKING:
-    from redbot.core.bot import Red
+    from redbot.core.bot import Quizset
 
 __all__ = ["Core"]
 
@@ -51,7 +49,7 @@ TokenConverter = commands.get_dict_converter(delims=[" ", ",", ";"])
 
 
 class CoreLogic:
-    def __init__(self, bot: "Red"):
+    def __init__(self, bot: "Quizset"):
         self.bot = bot
         self.bot.register_rpc_handler(self._load)
         self.bot.register_rpc_handler(self._unload)
@@ -149,6 +147,25 @@ class CoreLogic:
         for child_name, lib in children.items():
             importlib._bootstrap._exec(lib.__spec__, lib)
 
+    @staticmethod
+    def _get_package_strings(
+        packages: List[str], fmt: str, other: Optional[Tuple[str, ...]] = None
+    ) -> str:
+        """
+        Gets the strings needed for the load, unload and reload commands
+        """
+        packages = [inline(name) for name in packages]
+
+        if other is None:
+            other = ("", "")
+        plural = "s" if len(packages) > 1 else ""
+        use_and, other = ("", other[0]) if len(packages) == 1 else (" and ", other[1])
+        packages_string = ", ".join(packages[:-1]) + use_and + packages[-1]
+
+        form = {"plural": plural, "packs": packages_string, "other": other}
+        final_string = fmt.format(**form)
+        return final_string
+
     async def _unload(self, cog_names: Iterable[str]) -> Tuple[List[str], List[str]]:
         """
         Unloads cogs with the given names.
@@ -229,7 +246,7 @@ class CoreLogic:
     @classmethod
     async def _version_info(cls) -> Dict[str, str]:
         """
-        Version information for Red and discord.py
+        Version information for Quizset and discord.py
 
         Returns
         -------
@@ -248,15 +265,7 @@ class CoreLogic:
             Invite URL.
         """
         app_info = await self.bot.application_info()
-        perms_int = await self.bot.db.invite_perm()
-        permissions = discord.Permissions(perms_int)
-        return discord.utils.oauth_url(app_info.id, permissions)
-
-    @staticmethod
-    async def _can_get_invite_url(ctx):
-        is_owner = await ctx.bot.is_owner(ctx.author)
-        is_invite_public = await ctx.bot.db.invite_public()
-        return is_owner or is_invite_public
+        return discord.utils.oauth_url(app_info.id)
 
 
 @i18n.cog_i18n(_)
@@ -268,13 +277,14 @@ class Core(commands.Cog, CoreLogic):
         """Pong."""
         await ctx.send("Pong.")
 
+    @commands.is_owner()
     @commands.command()
     async def info(self, ctx: commands.Context):
-        """Shows info about Red"""
+        """Shows info about Quizset"""
         author_repo = "https://github.com/Twentysix26"
         org_repo = "https://github.com/Cog-Creators"
-        red_repo = org_repo + "/Red-DiscordBot"
-        red_pypi = "https://pypi.python.org/pypi/Red-DiscordBot"
+        red_repo = org_repo + "/Quizset-DiscordBot"
+        red_pypi = "https://pypi.python.org/pypi/Quizset-DiscordBot"
         support_server_url = "https://discord.gg/red"
         dpy_repo = "https://github.com/Rapptz/discord.py"
         python_url = "https://www.python.org/"
@@ -292,9 +302,9 @@ class Core(commands.Cog, CoreLogic):
                 data = await r.json()
         outdated = VersionInfo.from_str(data["info"]["version"]) > red_version_info
         about = _(
-            "This is an instance of [Red, an open source Discord bot]({}) "
+            "This is an instance of [Quizset, an open source Discord bot]({}) "
             "created by [Twentysix]({}) and [improved by many]({}).\n\n"
-            "Red is backed by a passionate community who contributes and "
+            "Quizset is backed by a passionate community who contributes and "
             "creates content for everyone to enjoy. [Join us today]({}) "
             "and help us improve!\n\n"
         ).format(red_repo, author_repo, org_repo, support_server_url)
@@ -303,14 +313,14 @@ class Core(commands.Cog, CoreLogic):
         embed.add_field(name=_("Instance owned by"), value=str(owner))
         embed.add_field(name="Python", value=python_version)
         embed.add_field(name="discord.py", value=dpy_version)
-        embed.add_field(name=_("Red version"), value=red_version)
+        embed.add_field(name=_("Quizset version"), value=red_version)
         if outdated:
             embed.add_field(
                 name=_("Outdated"), value=_("Yes, {} is available").format(data["info"]["version"])
             )
         if custom_info:
             embed.add_field(name=_("About this instance"), value=custom_info, inline=False)
-        embed.add_field(name=_("About Red"), value=about, inline=False)
+        embed.add_field(name=_("About Quizset"), value=about, inline=False)
 
         embed.set_footer(
             text=_("Bringing joy since 02 Jan 2016 (over {} days ago!)").format(days_since)
@@ -322,7 +332,7 @@ class Core(commands.Cog, CoreLogic):
 
     @commands.command()
     async def uptime(self, ctx: commands.Context):
-        """Shows Red's uptime"""
+        """Shows the bot's uptime"""
         since = ctx.bot.uptime.strftime("%Y-%m-%d %H:%M:%S")
         delta = datetime.datetime.utcnow() - self.bot.uptime
         await ctx.send(
@@ -432,64 +442,10 @@ class Core(commands.Cog, CoreLogic):
             await ctx.send(_("No exception has occurred yet"))
 
     @commands.command()
-    @commands.check(CoreLogic._can_get_invite_url)
-    async def invite(self, ctx):
-        """Show's Red's invite url"""
-        await ctx.author.send(await self._invite_url())
-
-    @commands.group()
     @checks.is_owner()
-    async def inviteset(self, ctx):
-        """Setup the bot's invite"""
-        pass
-
-    @inviteset.command()
-    async def public(self, ctx, confirm: bool = False):
-        """
-        Define if the command should be accessible\
-        for the average users.
-        """
-        if await self.bot.db.invite_public():
-            await self.bot.db.invite_public.set(False)
-            await ctx.send("The invite is now private.")
-            return
-        app_info = await self.bot.application_info()
-        if not app_info.bot_public:
-            await ctx.send(
-                "I am not a public bot. That means that nobody except "
-                "you can invite me on new servers.\n\n"
-                "You can change this by ticking `Public bot` in "
-                "your token settings: "
-                "https://discordapp.com/developers/applications/me/{0}".format(self.bot.user.id)
-            )
-            return
-        if not confirm:
-            await ctx.send(
-                "You're about to make the `{0}invite` command public. "
-                "All users will be able to invite me on their server.\n\n"
-                "If you agree, you can type `{0}inviteset public yes`.".format(ctx.prefix)
-            )
-        else:
-            await self.bot.db.invite_public.set(True)
-            await ctx.send("The invite command is now public.")
-
-    @inviteset.command()
-    async def perms(self, ctx, level: int):
-        """
-        Make the bot create its own role with permissions on join.
-
-        The bot will create its own role with the desired permissions\
-        when he join a new server. This is a special role that can't be\
-        deleted or removed from the bot.
-
-        For that, you need to give a valid permissions level.
-        You can generate one here: https://discordapi.com/permissions.html
-
-        Please note that you might need the two factor authentification for\
-        some permissions.
-        """
-        await self.bot.db.invite_perm.set(level)
-        await ctx.send("The new permissions level has been set.")
+    async def invite(self, ctx: commands.Context):
+        """Show's Quizset's invite url"""
+        await ctx.author.send(await self._invite_url())
 
     @commands.command()
     @commands.guild_only()
@@ -567,64 +523,38 @@ class Core(commands.Cog, CoreLogic):
         async with ctx.typing():
             loaded, failed, not_found, already_loaded, failed_with_reason = await self._load(cogs)
 
-        output = []
-
         if loaded:
-            loaded_packages = humanize_list([inline(package) for package in loaded])
-            formed = _("Loaded {packs}.").format(packs=loaded_packages)
-            output.append(formed)
+            fmt = _("Loaded {packs}.")
+            formed = self._get_package_strings(loaded, fmt)
+            await ctx.send(formed)
 
         if already_loaded:
-            if len(already_loaded) == 1:
-                formed = _("The following package is already loaded: {pack}").format(
-                    pack=inline(already_loaded[0])
-                )
-            else:
-                formed = _("The following packages are already loaded: {packs}").format(
-                    packs=humanize_list([inline(package) for package in already_loaded])
-                )
-            output.append(formed)
+            fmt = _("The package{plural} {packs} {other} already loaded.")
+            formed = self._get_package_strings(already_loaded, fmt, (_("is"), _("are")))
+            await ctx.send(formed)
 
         if failed:
-            if len(failed) == 1:
-                formed = _(
-                    "Failed to load the following package: {pack}."
-                    "\nCheck your console or logs for details."
-                ).format(pack=inline(failed[0]))
-            else:
-                formed = _(
-                    "Failed to load the following packages: {packs}"
-                    "\nCheck your console or logs for details."
-                ).format(packs=humanize_list([inline(package) for package in failed]))
-            output.append(formed)
+            fmt = _(
+                "Failed to load package{plural} {packs}. Check your console or "
+                "logs for details."
+            )
+            formed = self._get_package_strings(failed, fmt)
+            await ctx.send(formed)
 
         if not_found:
-            if len(not_found) == 1:
-                formed = _("The following package was not found in any cog path: {pack}.").format(
-                    pack=inline(not_found[0])
-                )
-            else:
-                formed = _(
-                    "The following packages were not found in any cog path: {packs}"
-                ).format(packs=humanize_list([inline(package) for package in not_found]))
-            output.append(formed)
+            fmt = _("The package{plural} {packs} {other} not found in any cog path.")
+            formed = self._get_package_strings(not_found, fmt, (_("was"), _("were")))
+            await ctx.send(formed)
 
         if failed_with_reason:
+            fmt = _(
+                "{other} package{plural} could not be loaded for the following reason{plural}:\n\n"
+            )
             reasons = "\n".join([f"`{x}`: {y}" for x, y in failed_with_reason])
-            if len(failed_with_reason) == 1:
-                formed = _(
-                    "This package could not be loaded for the following reason:\n\n{reason}"
-                ).format(reason=reasons)
-            else:
-                formed = _(
-                    "These packages could not be loaded for the following reasons:\n\n{reasons}"
-                ).format(reasons=reasons)
-            output.append(formed)
-
-        if output:
-            total_message = "\n\n".join(output)
-            for page in pagify(total_message):
-                await ctx.send(page)
+            formed = self._get_package_strings(
+                [x for x, y in failed_with_reason], fmt, (_("This"), _("These"))
+            )
+            await ctx.send(formed + reasons)
 
     @commands.command()
     @checks.is_owner()
@@ -635,34 +565,15 @@ class Core(commands.Cog, CoreLogic):
         cogs = tuple(map(lambda cog: cog.rstrip(","), cogs))
         unloaded, failed = await self._unload(cogs)
 
-        output = []
-
         if unloaded:
-            if len(unloaded) == 1:
-                formed = _("The following package was unloaded: {pack}.").format(
-                    pack=inline(unloaded[0])
-                )
-            else:
-                formed = _("The following packages were unloaded: {packs}.").format(
-                    packs=humanize_list([inline(package) for package in unloaded])
-                )
-            output.append(formed)
+            fmt = _("Package{plural} {packs} {other} unloaded.")
+            formed = self._get_package_strings(unloaded, fmt, (_("was"), _("were")))
+            await ctx.send(formed)
 
         if failed:
-            if len(failed) == 1:
-                formed = _("The following package was not loaded: {pack}.").format(
-                    pack=inline(failed[0])
-                )
-            else:
-                formed = _("The following packages were not loaded: {packs}.").format(
-                    packs=humanize_list([inline(package) for package in failed])
-                )
-            output.append(formed)
-
-        if output:
-            total_message = "\n\n".join(output)
-            for page in pagify(total_message):
-                await ctx.send(page)
+            fmt = _("The package{plural} {packs} {other} not loaded.")
+            formed = self._get_package_strings(failed, fmt, (_("is"), _("are")))
+            await ctx.send(formed)
 
     @commands.command(name="reload")
     @checks.is_owner()
@@ -676,53 +587,30 @@ class Core(commands.Cog, CoreLogic):
                 cogs
             )
 
-        output = []
-
         if loaded:
-            loaded_packages = humanize_list([inline(package) for package in loaded])
-            formed = _("Reloaded {packs}.").format(packs=loaded_packages)
-            output.append(formed)
+            fmt = _("Package{plural} {packs} {other} reloaded.")
+            formed = self._get_package_strings(loaded, fmt, (_("was"), _("were")))
+            await ctx.send(formed)
 
         if failed:
-            if len(failed) == 1:
-                formed = _(
-                    "Failed to reload the following package: {pack}."
-                    "\nCheck your console or logs for details."
-                ).format(pack=inline(failed[0]))
-            else:
-                formed = _(
-                    "Failed to reload the following packages: {packs}"
-                    "\nCheck your console or logs for details."
-                ).format(packs=humanize_list([inline(package) for package in failed]))
-            output.append(formed)
+            fmt = _("Failed to reload package{plural} {packs}. Check your logs for details")
+            formed = self._get_package_strings(failed, fmt)
+            await ctx.send(formed)
 
         if not_found:
-            if len(not_found) == 1:
-                formed = _("The following package was not found in any cog path: {pack}.").format(
-                    pack=inline(not_found[0])
-                )
-            else:
-                formed = _(
-                    "The following packages were not found in any cog path: {packs}"
-                ).format(packs=humanize_list([inline(package) for package in not_found]))
-            output.append(formed)
+            fmt = _("The package{plural} {packs} {other} not found in any cog path.")
+            formed = self._get_package_strings(not_found, fmt, (_("was"), _("were")))
+            await ctx.send(formed)
 
         if failed_with_reason:
+            fmt = _(
+                "{other} package{plural} could not be reloaded for the following reason{plural}:\n\n"
+            )
             reasons = "\n".join([f"`{x}`: {y}" for x, y in failed_with_reason])
-            if len(failed_with_reason) == 1:
-                formed = _(
-                    "This package could not be reloaded for the following reason:\n\n{reason}"
-                ).format(reason=reasons)
-            else:
-                formed = _(
-                    "These packages could not be reloaded for the following reasons:\n\n{reasons}"
-                ).format(reasons=reasons)
-            output.append(formed)
-
-        if output:
-            total_message = "\n\n".join(output)
-            for page in pagify(total_message):
-                await ctx.send(page)
+            formed = self._get_package_strings(
+                [x for x, y in failed_with_reason], fmt, (_("This"), _("These"))
+            )
+            await ctx.send(formed + reasons)
 
     @commands.command(name="shutdown")
     @checks.is_owner()
@@ -738,9 +626,9 @@ class Core(commands.Cog, CoreLogic):
     @commands.command(name="restart")
     @checks.is_owner()
     async def _restart(self, ctx: commands.Context, silently: bool = False):
-        """Attempts to restart Red
+        """Attempts to restart Quizset
 
-        Makes Red quit with exit code 26
+        Makes Quizset quit with exit code 26
         The restart is not guaranteed: it must be dealt
         with by the process manager in use"""
         with contextlib.suppress(discord.HTTPException):
@@ -748,23 +636,22 @@ class Core(commands.Cog, CoreLogic):
                 await ctx.send(_("Restarting..."))
         await ctx.bot.shutdown(restart=True)
 
+    @commands.is_owner()
     @commands.group(name="set")
     async def _set(self, ctx: commands.Context):
-        """Changes Red's settings"""
+        """Changes Quizset's settings"""
         if ctx.invoked_subcommand is None:
             if ctx.guild:
                 guild = ctx.guild
-                admin_role_ids = await ctx.bot.db.guild(ctx.guild).admin_role()
-                admin_role_names = [r.name for r in guild.roles if r.id in admin_role_ids]
-                admin_roles_str = (
-                    humanize_list(admin_role_names) if admin_role_names else "Not Set."
+                admin_role = (
+                    guild.get_role(await ctx.bot.db.guild(ctx.guild).admin_role()) or "Not set"
                 )
-                mod_role_ids = await ctx.bot.db.guild(ctx.guild).mod_role()
-                mod_role_names = [r.name for r in guild.roles if r.id in mod_role_ids]
-                mod_roles_str = humanize_list(mod_role_names) if mod_role_names else "Not Set."
+                mod_role = (
+                    guild.get_role(await ctx.bot.db.guild(ctx.guild).mod_role()) or "Not set"
+                )
                 prefixes = await ctx.bot.db.guild(ctx.guild).prefix()
-                guild_settings = _("Admin roles: {admin}\nMod roles: {mod}\n").format(
-                    admin=admin_roles_str, mod=mod_roles_str
+                guild_settings = _("Admin role: {admin}\nMod role: {mod}\n").format(
+                    admin=admin_role, mod=mod_role
                 )
             else:
                 guild_settings = ""
@@ -785,60 +672,23 @@ class Core(commands.Cog, CoreLogic):
                 guild_settings=guild_settings,
                 locale=locale,
             )
-            for page in pagify(settings):
-                await ctx.send(box(page))
+            await ctx.send(box(settings))
 
     @_set.command()
     @checks.guildowner()
     @commands.guild_only()
-    async def addadminrole(self, ctx: commands.Context, *, role: discord.Role):
-        """
-        Adds an admin role for this guild.
-        """
-        async with ctx.bot.db.guild(ctx.guild).admin_role() as roles:
-            if role.id in roles:
-                return await ctx.send(_("This role is already an admin role."))
-            roles.append(role.id)
-        await ctx.send(_("That role is now considered an admin role."))
+    async def adminrole(self, ctx: commands.Context, *, role: discord.Role):
+        """Sets the admin role for this server"""
+        await ctx.bot.db.guild(ctx.guild).admin_role.set(role.id)
+        await ctx.send(_("The admin role for this guild has been set."))
 
     @_set.command()
     @checks.guildowner()
     @commands.guild_only()
-    async def addmodrole(self, ctx: commands.Context, *, role: discord.Role):
-        """
-        Adds a mod role for this guild.
-        """
-        async with ctx.bot.db.guild(ctx.guild).mod_role() as roles:
-            if role.id in roles:
-                return await ctx.send(_("This role is already a mod role."))
-            roles.append(role.id)
-        await ctx.send(_("That role is now considered a mod role."))
-
-    @_set.command(aliases=["remadmindrole", "deladminrole", "deleteadminrole"])
-    @checks.guildowner()
-    @commands.guild_only()
-    async def removeadminrole(self, ctx: commands.Context, *, role: discord.Role):
-        """
-        Removes an admin role for this guild.
-        """
-        async with ctx.bot.db.guild(ctx.guild).admin_role() as roles:
-            if role.id not in roles:
-                return await ctx.send(_("That role was not an admin role to begin with."))
-            roles.remove(role.id)
-        await ctx.send(_("That role is no longer considered an admin role."))
-
-    @_set.command(aliases=["remmodrole", "delmodrole", "deletemodrole"])
-    @checks.guildowner()
-    @commands.guild_only()
-    async def removemodrole(self, ctx: commands.Context, *, role: discord.Role):
-        """
-        Removes a mod role for this guild.
-        """
-        async with ctx.bot.db.guild(ctx.guild).mod_role() as roles:
-            if role.id not in roles:
-                return await ctx.send(_("That role was not a mod role to begin with."))
-            roles.remove(role.id)
-        await ctx.send(_("That role is no longer considered a mod role."))
+    async def modrole(self, ctx: commands.Context, *, role: discord.Role):
+        """Sets the mod role for this server"""
+        await ctx.bot.db.guild(ctx.guild).mod_role.set(role.id)
+        await ctx.send(_("The mod role for this guild has been set."))
 
     @_set.command(aliases=["usebotcolor"])
     @checks.guildowner()
@@ -899,7 +749,7 @@ class Core(commands.Cog, CoreLogic):
 
         Acceptable values for the colour parameter can be found at:
 
-        https://discordpy.readthedocs.io/en/stable/ext/commands/api.html#discord.ext.commands.ColourConverter
+        http://discordpy.readthedocs.io/en/rewrite/ext/commands/api.html#discord.ext.commands.ColourConverter
         """
         if colour is None:
             ctx.bot.color = discord.Color.red()
@@ -912,7 +762,7 @@ class Core(commands.Cog, CoreLogic):
     @_set.command()
     @checks.is_owner()
     async def avatar(self, ctx: commands.Context, url: str):
-        """Sets Red's avatar"""
+        """Sets Quizset's avatar"""
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as r:
                 data = await r.read()
@@ -936,7 +786,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.bot_in_a_guild()
     @checks.is_owner()
     async def _game(self, ctx: commands.Context, *, game: str = None):
-        """Sets Red's playing status"""
+        """Sets Quizset's playing status"""
 
         if game:
             game = discord.Game(name=game)
@@ -950,7 +800,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.bot_in_a_guild()
     @checks.is_owner()
     async def _listening(self, ctx: commands.Context, *, listening: str = None):
-        """Sets Red's listening status"""
+        """Sets Quizset's listening status"""
 
         status = ctx.bot.guilds[0].me.status if len(ctx.bot.guilds) > 0 else discord.Status.online
         if listening:
@@ -964,7 +814,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.bot_in_a_guild()
     @checks.is_owner()
     async def _watching(self, ctx: commands.Context, *, watching: str = None):
-        """Sets Red's watching status"""
+        """Sets Quizset's watching status"""
 
         status = ctx.bot.guilds[0].me.status if len(ctx.bot.guilds) > 0 else discord.Status.online
         if watching:
@@ -978,7 +828,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.bot_in_a_guild()
     @checks.is_owner()
     async def status(self, ctx: commands.Context, *, status: str):
-        """Sets Red's status
+        """Sets Quizset's status
 
         Available statuses:
             online
@@ -1007,7 +857,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.bot_in_a_guild()
     @checks.is_owner()
     async def stream(self, ctx: commands.Context, streamer=None, *, stream_title=None):
-        """Sets Red's streaming status
+        """Sets Quizset's streaming status
         Leaving both streamer and stream_title empty will clear it."""
 
         status = ctx.bot.guilds[0].me.status if len(ctx.bot.guilds) > 0 else None
@@ -1028,7 +878,7 @@ class Core(commands.Cog, CoreLogic):
     @_set.command(name="username", aliases=["name"])
     @checks.is_owner()
     async def _username(self, ctx: commands.Context, *, username: str):
-        """Sets Red's username"""
+        """Sets Quizset's username"""
         try:
             await self._name(name=username)
         except discord.HTTPException:
@@ -1047,7 +897,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.admin()
     @commands.guild_only()
     async def _nickname(self, ctx: commands.Context, *, nickname: str = None):
-        """Sets Red's nickname"""
+        """Sets Quizset's nickname"""
         try:
             await ctx.guild.me.edit(nick=nickname)
         except discord.Forbidden:
@@ -1058,7 +908,7 @@ class Core(commands.Cog, CoreLogic):
     @_set.command(aliases=["prefixes"])
     @checks.is_owner()
     async def prefix(self, ctx: commands.Context, *prefixes: str):
-        """Sets Red's global prefix(es)"""
+        """Sets Quizset's global prefix(es)"""
         if not prefixes:
             await ctx.send_help()
             return
@@ -1069,7 +919,7 @@ class Core(commands.Cog, CoreLogic):
     @checks.admin()
     @commands.guild_only()
     async def serverprefix(self, ctx: commands.Context, *prefixes: str):
-        """Sets Red's server prefix(es)"""
+        """Sets Quizset's server prefix(es)"""
         if not prefixes:
             await ctx.bot.db.guild(ctx.guild).prefix.set([])
             await ctx.send(_("Guild prefixes have been reset."))
@@ -1079,9 +929,10 @@ class Core(commands.Cog, CoreLogic):
         await ctx.send(_("Prefix set."))
 
     @_set.command()
+    @commands.is_owner()
     @commands.cooldown(1, 60 * 10, commands.BucketType.default)
     async def owner(self, ctx: commands.Context):
-        """Sets Red's main owner"""
+        """Sets Quizset's main owner"""
         # According to the Python docs this is suitable for cryptographic use
         random = SystemRandom()
         length = random.randint(25, 35)
@@ -1095,7 +946,7 @@ class Core(commands.Cog, CoreLogic):
         print(token)
 
         owner_disclaimer = _(
-            "⚠ **Only** the person who is hosting Red should be "
+            "⚠ **Only** the person who is hosting Quizset should be "
             "owner. **This has SERIOUS security implications. The "
             "owner can access any data that is present on the host "
             "system.** ⚠"
@@ -1115,13 +966,13 @@ class Core(commands.Cog, CoreLogic):
                 "message", check=MessagePredicate.same_context(ctx), timeout=60
             )
         except asyncio.TimeoutError:
-            ctx.command.reset_cooldown(ctx)
+            self.owner.reset_cooldown(ctx)
             await ctx.send(
                 _("The `{prefix}set owner` request has timed out.").format(prefix=ctx.prefix)
             )
         else:
             if message.content.strip() == token:
-                ctx.command.reset_cooldown(ctx)
+                self.owner.reset_cooldown(ctx)
                 await ctx.bot.db.owner.set(ctx.author.id)
                 ctx.bot.owner_id = ctx.author.id
                 await ctx.send(_("You have been set as owner."))
@@ -1408,9 +1259,9 @@ class Core(commands.Cog, CoreLogic):
                 docs = await db[c_name].find().to_list(None)
                 for item in docs:
                     item_id = str(item.pop("_id"))
+                    output = item
                     target = JSON(c_name, item_id, data_path_override=c_data_path)
-                    target.data = item
-                    await target._save()
+                    await target.jsonIO._threadsafe_save_json(output)
         backup_filename = "redv3-{}-{}.tar.gz".format(
             instance_name, ctx.message.created_at.strftime("%Y-%m-%d %H-%M-%S")
         )
@@ -1652,7 +1503,7 @@ class Core(commands.Cog, CoreLogic):
         """Shows debug information useful for debugging.."""
 
         if sys.platform == "linux":
-            import distro  # pylint: disable=import-error
+            import distro
 
         IS_WINDOWS = os.name == "nt"
         IS_MAC = sys.platform == "darwin"
@@ -1677,8 +1528,8 @@ class Core(commands.Cog, CoreLogic):
 
         if await ctx.embed_requested():
             e = discord.Embed(color=await ctx.embed_colour())
-            e.title = "Debug Info for Red"
-            e.add_field(name="Red version", value=redver, inline=True)
+            e.title = "Debug Info for Quizset"
+            e.add_field(name="Quizset version", value=redver, inline=True)
             e.add_field(name="Python version", value=pyver, inline=True)
             e.add_field(name="Discord.py version", value=dpy_version, inline=True)
             e.add_field(name="Pip version", value=pipver, inline=True)
@@ -1688,8 +1539,8 @@ class Core(commands.Cog, CoreLogic):
             await ctx.send(embed=e)
         else:
             info = (
-                "Debug Info for Red\n\n"
-                + "Red version: {}\n".format(redver)
+                "Debug Info for Quizset\n\n"
+                + "Quizset version: {}\n".format(redver)
                 + "Python version: {}\n".format(pyver)
                 + "Discord.py version: {}\n".format(dpy_version)
                 + "Pip version: {}\n".format(pipver)
@@ -1819,6 +1670,7 @@ class Core(commands.Cog, CoreLogic):
         await ctx.bot.db.blacklist.set([])
         await ctx.send(_("Blacklist has been cleared."))
 
+    @commands.is_owner()
     @commands.group()
     @commands.guild_only()
     @checks.admin_or_permissions(administrator=True)
@@ -1893,6 +1745,7 @@ class Core(commands.Cog, CoreLogic):
         await ctx.bot.db.guild(ctx.guild).whitelist.set([])
         await ctx.send(_("Whitelist has been cleared."))
 
+    @commands.is_owner()
     @commands.group()
     @commands.guild_only()
     @checks.admin_or_permissions(administrator=True)
@@ -2002,12 +1855,6 @@ class Core(commands.Cog, CoreLogic):
             )
             return
 
-        if self.command_manager in command_obj.parents or self.command_manager == command_obj:
-            await ctx.send(
-                _("The command to disable cannot be `command` or any of its subcommands.")
-            )
-            return
-
         async with ctx.bot.db.disabled_commands() as disabled_commands:
             if command not in disabled_commands:
                 disabled_commands.append(command_obj.qualified_name)
@@ -2028,16 +1875,6 @@ class Core(commands.Cog, CoreLogic):
             await ctx.send(
                 _("I couldn't find that command. Please note that it is case sensitive.")
             )
-            return
-
-        if self.command_manager in command_obj.parents or self.command_manager == command_obj:
-            await ctx.send(
-                _("The command to disable cannot be `command` or any of its subcommands.")
-            )
-            return
-
-        if command_obj.requires.privilege_level > await PrivilegeLevel.from_ctx(ctx):
-            await ctx.send(_("You are not allowed to disable that command."))
             return
 
         async with ctx.bot.db.guild(ctx.guild).disabled_commands() as disabled_commands:
@@ -2094,10 +1931,6 @@ class Core(commands.Cog, CoreLogic):
             await ctx.send(
                 _("I couldn't find that command. Please note that it is case sensitive.")
             )
-            return
-
-        if command_obj.requires.privilege_level > await PrivilegeLevel.from_ctx(ctx):
-            await ctx.send(_("You are not allowed to enable that command."))
             return
 
         async with ctx.bot.db.guild(ctx.guild).disabled_commands() as disabled_commands:
