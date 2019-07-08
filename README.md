@@ -1,3 +1,6 @@
+To download (Rehash):
+> python3.7 -m pip install -U git+https://github.com/voctory/Red-DiscordBot@V3/develop#egg=Red-DiscordBot
+
 <h1 align="center">
   <br>
   <a href="https://github.com/Cog-Creators/Red-DiscordBot/tree/V3/develop"><img src="https://imgur.com/pY1WUFX.png" alt="Red - Discord Bot"></a>
